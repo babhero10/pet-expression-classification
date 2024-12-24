@@ -1,43 +1,36 @@
 """
-Script for applying transfer learning using pre-trained ImageNet weights.
+Script for training models from scratch and saving results.
 """
 import os
 import json
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torchvision import models
 from utils.data_loader import load_data
-from utils.metrics import compute_metrics, plot_confusion_matrix, evaluate_model
+from utils.metrics import compute_metrics, plot_confusion_matrix
 from utils.visualization import save_training_plots
+from models.vgg import create_model
 
 DATA_DIR = "data/pets_facial_expressions/"
-RESULTS_DIR = "results/transfer_learning/"
+RESULTS_DIR = "results/vgg16/"
 IMG_SIZE = (224, 224)
 BATCH_SIZE = 32
-EPOCHS = 5
+EPOCHS = 10
+LEARNING_RATE = 0.0001
 
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 # Load data
 train_loader, val_loader, test_loader, class_labels = load_data(DATA_DIR, img_size=IMG_SIZE, batch_size=BATCH_SIZE)
 
-# Load pre-trained model
-model = models.resnet50(pretrained=True)
-num_features = model.fc.in_features
-model.fc = nn.Linear(num_features, len(class_labels))
+# Create model
+model = create_model(num_classes=len(class_labels))
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model.to(device)
 
-# Freeze layers except the last one
-for param in model.parameters():
-    param.requires_grad = False
-for param in model.fc.parameters():
-    param.requires_grad = True
-
 # Loss and optimizer
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.fc.parameters(), lr=0.0001)
+optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
 # Training loop
 history = {'train_loss': [], 'val_loss': [], 'train_acc': [], 'val_acc': [], 'precision': [], 'recall': [], 'f1': []}

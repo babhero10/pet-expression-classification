@@ -16,6 +16,7 @@ RESULTS_DIR = "results/transfer_learning/"
 IMG_SIZE = (224, 224)
 BATCH_SIZE = 32
 EPOCHS = 5
+LEARNING_RATE = 0.0001
 
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
@@ -37,7 +38,7 @@ for param in model.fc.parameters():
 
 # Loss and optimizer
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.fc.parameters(), lr=0.0001)
+optimizer = optim.Adam(model.fc.parameters(), lr=LEARNING_RATE)
 
 # Training loop
 history = {'train_loss': [], 'val_loss': [], 'train_acc': [], 'val_acc': [], 'precision': [], 'recall': [], 'f1': []}
