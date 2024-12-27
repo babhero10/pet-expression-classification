@@ -14,7 +14,8 @@ def main():
     parser.add_argument("--results_dir", type=str, default="results/", help="Base directory to save results")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
     parser.add_argument("--epochs", type=int, default=10, help="Number of epochs")
-    parser.add_argument("--lr", type=float, default=0.0001, help="Learning rate")
+    parser.add_argument("--lr", type=float, default=1e-1, help="Learning rate")
+    parser.add_argument("--weight_decay", type=float, default=1e-4, help="Learning rate")
     args = parser.parse_args()
 
     RESULTS_DIR = os.path.join(args.results_dir, args.model)
@@ -51,7 +52,7 @@ def main():
 
     # Loss and optimizer
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     # Training loop
     history = {

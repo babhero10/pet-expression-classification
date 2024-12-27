@@ -13,7 +13,7 @@ python -m download
 
 To train the model, you can use the following command:
 ```
-python -m train --model "vgg19" --epochs 20 --lr 0.0005 --batch_size 8
+python -m train --model "vgg19" --epochs 20 --lr 0.0005 --batch_size 8 --weight_decay 1-e4
 ```
 
 To test the model (Not working yet), you can use the following command:
@@ -26,4 +26,5 @@ arguments:
 - `--epochs`: Number of epochs to train the model.
 - `--lr`: Learning rate.
 - `--batch_size`: Batch size.
+- `--wegith_decay`: Weight decay.
 

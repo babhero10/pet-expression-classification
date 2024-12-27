@@ -1,12 +1,26 @@
-"""
-Handles loading, preprocessing, and augmenting the pet facial expression dataset.
-"""
 import os
+from torch import manual_seed
 from torchvision import transforms
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, Subset
 from PIL import Image
+import random
 
-def load_data(data_dir, img_size=(224, 224), batch_size=32):
+def load_data(data_dir, img_size=(224, 224), batch_size=32, num_train_samples=None, seed=42):
+    """
+    Loads image data, optionally limiting the number of training samples.
+
+    Args:
+        data_dir (str): Path to the directory containing 'train', 'valid', and 'test' folders.
+        img_size (tuple): Desired image size (height, width).
+        batch_size (int): Batch size for data loaders.
+        num_train_samples (int, optional): If specified, the maximum number of training samples to use. Defaults to None (use all).
+        seed (int, optional) : seed for reproducible shuffling.
+    Returns:
+        tuple: train_loader, val_loader, test_loader, class_labels
+    """
+    random.seed(seed)
+    manual_seed(seed)
+
     class CustomDataset(Dataset):
         def __init__(self, root_dir, transform=None):
             self.root_dir = root_dir
@@ -40,11 +54,22 @@ def load_data(data_dir, img_size=(224, 224), batch_size=32):
     ])
 
     train_dataset = CustomDataset(os.path.join(data_dir, "train"), transform=transform)
-    val_dataset = CustomDataset(os.path.join(data_dir, "valid"), transform=transform)
-    test_dataset = CustomDataset(os.path.join(data_dir, "test"), transform=transform)
+    val_dataset   = CustomDataset(os.path.join(data_dir, "valid"), transform=transform)
+    test_dataset  = CustomDataset(os.path.join(data_dir, "test"), transform=transform)
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    # Limit training data if num_train_samples is specified
+    if num_train_samples is not None:
+        indices = list(range(len(train_dataset)))
+        random.shuffle(indices)
+        train_indices = indices[:num_train_samples]
+        train_subset = Subset(train_dataset, train_indices)
+        train_loader = DataLoader(train_subset, batch_size=batch_size, shuffle=True)
+    else:
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+
+
+    val_loader   = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    test_loader  = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
 
     return train_loader, val_loader, test_loader, train_dataset.classes

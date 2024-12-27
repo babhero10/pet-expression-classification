@@ -38,8 +38,8 @@ def evaluate_model(model, data_loader, device, class_labels, results_dir):
     report, cm, precision, recall, f1 = compute_metrics(all_labels, all_preds, class_labels)
 
     print(f"Precision: {precision:.4f}, "
-      f"Recall: {recall:.4f}, F1: {f1:.4f}"
-      f"Confusion Matrix: {cm}") 
+      f"Recall: {recall:.4f}, F1: {f1:.4f}, "
+      f"Confusion Matrix:\n {cm}") 
 
     os.makedirs(results_dir, exist_ok=True)
 
