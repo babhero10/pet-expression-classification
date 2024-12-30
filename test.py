@@ -1,7 +1,6 @@
 """
 Script for testing the model with custom images.
 """
-import os
 import torch
 from torchvision import transforms
 from PIL import Image
@@ -54,4 +53,3 @@ if __name__ == "__main__":
 
     prediction = classify_image(IMAGE_PATH, MODEL_PATH, CLASS_LABELS)
     print(f"The predicted class is: {prediction}")
-

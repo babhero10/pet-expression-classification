@@ -72,4 +72,3 @@ class VGG19(nn.Module):
 
 def create_model(num_classes=1000):
     return VGG19(num_classes=num_classes)
-

@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 
 class MobileNet(nn.Module):
-    def _init_(self, num_classes=1000):
-        super(MobileNet, self)._init_()
+    def __init__(self, num_classes=1000):  # Corrected method name
+        super(MobileNet, self).__init__()
 
         def depthwise_separable_conv(in_channels, out_channels, stride):
             """Defines a depthwise separable convolution block."""

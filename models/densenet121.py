@@ -1,71 +1,128 @@
-class DenseNet121(nn.Module):
-    def __init__(self, num_classes=1000):
-        super(DenseNet121, self).__init__()
-        # Initial convolution
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
-        self.bn1 = nn.BatchNorm2d(64)
-        self.relu = nn.ReLU(inplace=True)
-        self.pool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from collections import OrderedDict
 
-        # Dense layers
-        self.dense_block1 = self._dense_block(64, 32, 6)
-        self.transition1 = self._transition(256, 128)
 
-        self.dense_block2 = self._dense_block(128, 32, 12)
-        self.transition2 = self._transition(512, 256)
+class DenseLayer(nn.Module):
+    """
+    A single dense layer within a Dense Block.
+    """
 
-        self.dense_block3 = self._dense_block(256, 32, 24)
-        self.transition3 = self._transition(1024, 512)
+    def __init__(self, in_channels, growth_rate, bn_size=4, drop_rate=0.0):
+        super(DenseLayer, self).__init__()
 
-        self.dense_block4 = self._dense_block(512, 32, 16)
-
-        # Classification layer
-        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(1024, num_classes)
-
-    def _dense_block(self, in_channels, growth_rate, num_layers):
-        layers = []
-        for _ in range(num_layers):
-            layers.append(self._bottleneck(in_channels, growth_rate))
-            in_channels += growth_rate
-        return nn.Sequential(*layers)
-
-    def _bottleneck(self, in_channels, growth_rate):
-        return nn.Sequential(
-            nn.BatchNorm2d(in_channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(in_channels, growth_rate * 4, kernel_size=1, bias=False),
-            nn.BatchNorm2d(growth_rate * 4),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(growth_rate * 4, growth_rate, kernel_size=3, padding=1, bias=False)
-        )
-
-    def _transition(self, in_channels, out_channels):
-        return nn.Sequential(
-            nn.BatchNorm2d(in_channels),
-            nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False),
-            nn.AvgPool2d(kernel_size=2, stride=2)
-        )
+        self.bn1 = nn.BatchNorm2d(in_channels)
+        self.conv1 = nn.Conv2d(in_channels, bn_size * growth_rate, kernel_size=1, stride=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(bn_size * growth_rate)
+        self.conv2 = nn.Conv2d(bn_size * growth_rate, growth_rate, kernel_size=3, stride=1, padding=1, bias=False)
+        self.drop_rate = drop_rate
 
     def forward(self, x):
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu(x)
-        x = self.pool(x)
+        out = self.bn1(x)
+        out = F.relu(out)
+        out = self.conv1(out)
+        out = self.bn2(out)
+        out = F.relu(out)
+        out = self.conv2(out)
 
-        x = self.dense_block1(x)
-        x = self.transition1(x)
-        x = self.dense_block2(x)
-        x = self.transition2(x)
-        x = self.dense_block3(x)
-        x = self.transition3(x)
-        x = self.dense_block4(x)
+        if self.drop_rate > 0:
+            out = F.dropout(out, p=self.drop_rate, training=self.training)
 
-        x = self.avgpool(x)
-        x = torch.flatten(x, 1)
-        x = self.fc(x)
-        return x
+        return torch.cat([x, out], 1)  # Concatenate along channel dim
+
+
+class DenseBlock(nn.Module):
+    """
+    A Dense Block, a sequence of DenseLayers.
+    """
+
+    def __init__(self, in_channels, num_layers, growth_rate, bn_size=4, drop_rate=0.0):
+        super(DenseBlock, self).__init__()
+        layers = []
+        for i in range(num_layers):
+            layers.append(DenseLayer(in_channels + i * growth_rate, growth_rate, bn_size, drop_rate))
+
+        self.layers = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.layers(x)
+
+class TransitionLayer(nn.Module):
+    """
+    Transition Layer - performs batch norm, 1x1 convolution, and pooling.
+    """
+
+    def __init__(self, in_channels, out_channels, drop_rate=0.0):
+        super(TransitionLayer, self).__init__()
+        self.bn = nn.BatchNorm2d(in_channels)
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, bias=False)
+        self.drop_rate = drop_rate
+
+    def forward(self, x):
+        out = self.bn(x)
+        out = F.relu(out)
+        out = self.conv(out)
+
+        if self.drop_rate > 0:
+            out = F.dropout(out, p=self.drop_rate, training=self.training)
+
+        out = F.avg_pool2d(out, kernel_size=2, stride=2)
+        return out
+
+
+class DenseNet121(nn.Module):
+    """
+    Implementation of DenseNet-121 architecture.
+    """
+
+    def __init__(self, num_classes=1000, growth_rate=32, bn_size=4, drop_rate=0.0):
+        super(DenseNet121, self).__init__()
+        self.growth_rate = growth_rate
+        self.drop_rate = drop_rate
+
+        # Initial Convolution Layer (same as in torchvision's implementation)
+        self.features = nn.Sequential(OrderedDict([
+            ('conv0', nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)),
+            ('bn0', nn.BatchNorm2d(64)),
+            ('relu0', nn.ReLU(inplace=True)),
+            ('pool0', nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
+        ]))
+
+        # Dense Blocks and Transition Layers
+        num_features = 64
+        num_layers_block1 = 6
+        num_layers_block2 = 12
+        num_layers_block3 = 24
+        num_layers_block4 = 16
+        self.features.add_module('denseblock1', DenseBlock(num_features, num_layers_block1, growth_rate, bn_size, drop_rate))
+        num_features = num_features + num_layers_block1 * growth_rate
+        self.features.add_module('transition1', TransitionLayer(num_features, num_features // 2, drop_rate))
+        num_features = num_features // 2
+
+        self.features.add_module('denseblock2', DenseBlock(num_features, num_layers_block2, growth_rate, bn_size, drop_rate))
+        num_features = num_features + num_layers_block2 * growth_rate
+        self.features.add_module('transition2', TransitionLayer(num_features, num_features // 2, drop_rate))
+        num_features = num_features // 2
+
+        self.features.add_module('denseblock3', DenseBlock(num_features, num_layers_block3, growth_rate, bn_size, drop_rate))
+        num_features = num_features + num_layers_block3 * growth_rate
+        self.features.add_module('transition3', TransitionLayer(num_features, num_features // 2, drop_rate))
+        num_features = num_features // 2
+
+        self.features.add_module('denseblock4', DenseBlock(num_features, num_layers_block4, growth_rate, bn_size, drop_rate))
+        num_features = num_features + num_layers_block4 * growth_rate
+
+        # Final Batch Norm and Classifier
+        self.features.add_module('bn5', nn.BatchNorm2d(num_features))
+        self.classifier = nn.Linear(num_features, num_classes)
+
+    def forward(self, x):
+        features = self.features(x)
+        out = F.relu(features)
+        out = F.adaptive_avg_pool2d(out, (1, 1)).view(features.size(0), -1)
+        out = self.classifier(out)
+        return out
 
 def create_model(num_classes=1000):
     return DenseNet121(num_classes=num_classes)
-

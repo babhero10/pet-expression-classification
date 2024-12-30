@@ -1,11 +1,14 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.optim.lr_scheduler import StepLR
 import os
 import argparse
+import yaml
 from utils.data_loader import load_data
-from utils.metrics import compute_metrics, plot_confusion_matrix, evaluate_model
+from utils.metrics import compute_metrics, evaluate_model
 from utils.visualization import save_training_plots
+import copy
 
 def main():
     parser = argparse.ArgumentParser(description="Train a model on pets facial expressions.")
@@ -15,7 +18,9 @@ def main():
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
     parser.add_argument("--epochs", type=int, default=10, help="Number of epochs")
     parser.add_argument("--lr", type=float, default=1e-1, help="Learning rate")
-    parser.add_argument("--weight_decay", type=float, default=1e-4, help="Learning rate")
+    parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay")
+    parser.add_argument("--step_size", type=int, default=5, help="Step size for learning rate scheduler")
+    parser.add_argument("--gamma", type=float, default=0.1, help="Gamma for learning rate scheduler")
     args = parser.parse_args()
 
     RESULTS_DIR = os.path.join(args.results_dir, args.model)
@@ -41,11 +46,13 @@ def main():
 
     # Load data
     train_loader, val_loader, test_loader, class_labels = load_data(
-        args.data_dir, img_size=tuple(img_size), batch_size=args.batch_size
+        args.data_dir, img_size=tuple(img_size), batch_size=args.batch_size, num_augmentations=0
     )
 
-    # Create model
+    print(f"Data loaded with {len(class_labels)} classes: {class_labels}")
+    print(f"Train size: {len(train_loader.dataset)}, Val size: {len(val_loader.dataset)}, Test size: {len(test_loader.dataset)}")
 
+    # Create model
     model = create_model(num_classes=len(class_labels))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
@@ -54,11 +61,18 @@ def main():
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
+    # Define StepLR scheduler
+    scheduler = StepLR(optimizer, step_size=args.step_size, gamma=args.gamma)
+
     # Training loop
     history = {
-        'train_loss': [], 'val_loss': [], 'train_acc': [], 'val_acc': [], 
+        'train_loss': [], 'val_loss': [], 'train_acc': [], 'val_acc': [],
         'precision': [], 'recall': [], 'f1': []
     }
+
+    best_val_acc = 0.0
+    best_model_state = None
+
     for epoch in range(args.epochs):
         model.train()
         running_loss = 0.0
@@ -112,18 +126,45 @@ def main():
         history['recall'].append(recall)
         history['f1'].append(f1)
 
-        print(f"Epoch [{epoch+1}/{args.epochs}], Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%, "
+        print(f"Epoch [{epoch + 1}/{args.epochs}], Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%, "
               f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%, Precision: {precision:.4f}, "
-              f"Recall: {recall:.4f}, F1: {f1:.4f}")
+              f"Recall: {recall:.4f}, F1: {f1:.4f}, "
+              f"Learning rate: {optimizer.param_groups[0]['lr']}")
+
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            best_model_state = copy.deepcopy(model.state_dict())
+            print(f"Epoch {epoch + 1}: New best model saved with val_acc: {val_acc:.2f}%")
+
+        # Step the scheduler after each epoch
+        scheduler.step()
 
     save_training_plots(history, RESULTS_DIR)
 
-    # Save model
-    model_path = os.path.join(RESULTS_DIR, f"{args.model}.pth")
-    torch.save(model.state_dict(), model_path)
-    print(f"Model saved at {model_path}")
+    # Save the best model
+    if best_model_state:
+        model_path = os.path.join(RESULTS_DIR, f"{args.model}_best.pth")
+        torch.save(best_model_state, model_path)
+        print(f"Best model saved at {model_path}")
+    else:
+        print("No best model was saved, training did not improve.")
+
+    # Save the args to a YAML file
+    with open(os.path.join(RESULTS_DIR, 'args.yaml'), 'w') as f:
+        yaml.dump(vars(args), f)
+
+    # Load the best model for evaluation
+    model = create_model(num_classes=len(class_labels)).to(device)
+
+    # Load the best model for evaluation
+    model.load_state_dict(best_model_state)
+    print("Best model loaded for evaluation")
 
     # Evaluate model
+    print("Training evaluation running.")
+    evaluate_model(model, train_loader, device, class_labels, os.path.join(RESULTS_DIR, 'train'))
+    print("Training evaluation completed. Metrics saved.")
+
     print("Validation evaluation running.")
     evaluate_model(model, val_loader, device, class_labels, os.path.join(RESULTS_DIR, 'val'))
     print("Validation evaluation completed. Metrics saved.")
@@ -134,4 +175,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

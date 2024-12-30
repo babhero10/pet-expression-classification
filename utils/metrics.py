@@ -36,17 +36,29 @@ def evaluate_model(model, data_loader, device, class_labels, results_dir):
             all_labels.extend(labels.cpu().numpy())
 
     report, cm, precision, recall, f1 = compute_metrics(all_labels, all_preds, class_labels)
+    
+    # Compute accuracy
+    total_correct = sum(p == l for p, l in zip(all_preds, all_labels))
+    accuracy = total_correct / len(all_labels) * 100
 
-    print(f"Precision: {precision:.4f}, "
-      f"Recall: {recall:.4f}, F1: {f1:.4f}, "
-      f"Confusion Matrix:\n {cm}") 
+    print(f"Accuracy: {accuracy:.2f}%, "
+          f"Precision: {precision:.4f}, "
+          f"Recall: {recall:.4f}, F1: {f1:.4f}, "
+          f"Confusion Matrix:\n {cm}")
 
     os.makedirs(results_dir, exist_ok=True)
 
     # Save metrics
-    with open(os.path.join(results_dir, 'classification_report.json'), 'w') as f:
-        json.dump(report, f, indent=4)
+    metrics = {
+        'accuracy': accuracy,
+        'precision': precision,
+        'recall': recall,
+        'f1_score': f1,
+        'classification_report': report
+    }
+    with open(os.path.join(results_dir, 'metrics.json'), 'w') as f:
+        json.dump(metrics, f, indent=4)
 
     plot_confusion_matrix(cm, class_labels, os.path.join(results_dir, 'confusion_matrix.png'))
 
-    return report, cm, precision, recall, f1
+    return accuracy, report, cm, precision, recall, f1
