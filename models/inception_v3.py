@@ -36,9 +36,30 @@ class InceptionBlock(nn.Module):
         outputs = [branch1x1, branch3x3, branch5x5, branch_pool]
         return torch.cat(outputs, 1)
 
+
+class InceptionAux(nn.Module):
+    def __init__(self, in_channels, num_classes):
+        super(InceptionAux, self).__init__()
+        self.conv = nn.Conv2d(in_channels, 128, kernel_size=1)
+        self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))  # Adaptative avg pooling.
+        self.fc1 = nn.Linear(128, 1024)  # Adjust the size if necessary
+        self.fc2 = nn.Linear(1024, num_classes)
+
+    def forward(self, x):
+        x = F.avg_pool2d(x, kernel_size=5, stride=3)
+        x = F.relu(self.conv(x))
+        x = self.avg_pool(x)  # Adaptive average pooling.
+        x = x.view(x.size(0), -1)  # Flatten
+        x = F.relu(self.fc1(x))
+        x = F.dropout(x, 0.5, training=self.training)
+        x = self.fc2(x)
+        return x
+
+
 class InceptionV3(nn.Module):
-    def __init__(self, num_classes=1000):
+    def __init__(self, num_classes=1000, aux_logits=True):
         super(InceptionV3, self).__init__()
+        self.aux_logits = aux_logits
 
         # Initial Convolution and Pooling Layers
         self.conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=0)
@@ -54,6 +75,10 @@ class InceptionV3(nn.Module):
         self.inception3a = InceptionBlock(192, 64, 48, 64, 64, 96, 32)
         self.inception3b = InceptionBlock(256, 64, 48, 64, 64, 96, 64)
         self.inception3c = InceptionBlock(288, 64, 48, 64, 64, 96, 64)
+
+        # Auxiliary Classifier
+        if self.aux_logits:
+            self.aux = InceptionAux(288, num_classes)
 
         # Average Pooling and Fully Connected Layer
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
@@ -71,12 +96,18 @@ class InceptionV3(nn.Module):
 
         x = self.inception3a(x)
         x = self.inception3b(x)
+        aux_out = None
+        if self.aux_logits and self.training:
+            aux_out = self.aux(x)
         x = self.inception3c(x)
 
         x = self.avg_pool(x)
         x = torch.flatten(x, 1)
         x = self.fc(x)
-        return x
+        if self.aux_logits and self.training:
+            return x, aux_out
+        else:
+            return x
 
 def create_model(num_classes=1000):
     return InceptionV3(num_classes=num_classes)

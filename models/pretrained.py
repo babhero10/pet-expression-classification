@@ -20,14 +20,14 @@ def create_model(num_classes):
 
     num_ftrs = model.classifier.in_features
 
-    hidden_layers = [512, 256, 128]
+    hidden_layers = [512, 256]
     layers = []
     prev_size = num_ftrs
 
     for hidden_size in hidden_layers:
         layers.append(nn.Linear(prev_size, hidden_size))
         layers.append(nn.ReLU())
-        # layers.append(nn.Dropout(0.0))
+        layers.append(nn.Dropout(0.5))
         prev_size = hidden_size
 
     layers.append(nn.Linear(prev_size, num_classes))

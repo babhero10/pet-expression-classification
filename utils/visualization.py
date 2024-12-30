@@ -1,9 +1,8 @@
-"""
-Handles visualization of training and evaluation metrics.
-"""
 import matplotlib.pyplot as plt
+import os
 
 def save_training_plots(history, results_dir):
+    """Saves training plots."""
     # Plot Accuracy
     plt.figure()
     plt.plot(history['train_acc'], label='Train Accuracy')
@@ -12,7 +11,7 @@ def save_training_plots(history, results_dir):
     plt.ylabel('Accuracy')
     plt.legend()
     plt.title('Training and Validation Accuracy')
-    plt.savefig(f"{results_dir}/accuracy_plot.png")
+    plt.savefig(os.path.join(results_dir, 'accuracy_plot.png'))
     plt.close()
 
     # Plot Loss
@@ -23,7 +22,7 @@ def save_training_plots(history, results_dir):
     plt.ylabel('Loss')
     plt.legend()
     plt.title('Training and Validation Loss')
-    plt.savefig(f"{results_dir}/loss_plot.png")
+    plt.savefig(os.path.join(results_dir, 'loss_plot.png'))
     plt.close()
 
     # Plot Precision, Recall, F1-Score
@@ -35,5 +34,5 @@ def save_training_plots(history, results_dir):
     plt.ylabel('Metrics')
     plt.legend()
     plt.title('Precision, Recall, and F1-Score')
-    plt.savefig(f"{results_dir}/metrics_plot.png")
+    plt.savefig(os.path.join(results_dir, 'metrics_plot.png'))
     plt.close()

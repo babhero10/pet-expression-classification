@@ -1,68 +1,149 @@
+import os
+import tqdm
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR
-import os
-import argparse
-import yaml
 from utils.data_loader import load_data
-from utils.metrics import compute_metrics, evaluate_model
+from utils.metrics import compute_metrics
 from utils.visualization import save_training_plots
-import copy
+from utils.helpers import load_config, save_model, create_model, early_stopping
+import yaml
+
+
+def train_step(model, data_loader, criterion, optimizer, device, accumulation_steps=1,
+               aux_loss_weight=0.4):
+    """Performs a single training step with optional gradient accumulation."""
+    model.train()
+    running_loss = 0.0
+    correct = 0
+    total = 0
+    all_preds = []
+    all_labels = []
+
+    optimizer.zero_grad()
+
+    for images, labels in tqdm.tqdm(data_loader, desc='Training loop'):  # Corrected Line
+        images, labels = images.to(device), labels.to(device)
+
+        outputs = model(images)
+
+        if isinstance(outputs, tuple):
+            main_out, aux_out = outputs
+            main_loss = criterion(main_out, labels)
+            aux_loss = criterion(aux_out, labels)
+            loss = main_loss + aux_loss * aux_loss_weight
+        else:
+            loss = criterion(outputs, labels)
+
+        # Scale the loss by the accumulation steps
+        loss = loss / accumulation_steps
+        loss.backward()
+
+        # Perform optimizer step every `accumulation_steps`
+        i = len(all_labels) // data_loader.batch_size
+        if (i + 1) % accumulation_steps == 0 or (i + 1) == len(data_loader):
+            optimizer.step()
+            optimizer.zero_grad()
+
+        running_loss += loss.item() * accumulation_steps  # Scale loss back to normal
+
+        if isinstance(outputs, tuple):
+            main_out, _ = outputs
+            _, predicted = torch.max(main_out, 1)
+        else:
+            _, predicted = torch.max(outputs, 1)
+
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
+        all_preds.extend(predicted.cpu())
+        all_labels.extend(labels.cpu())
+
+    avg_loss = running_loss / len(data_loader)
+    accuracy = 100. * correct / total
+
+    return avg_loss, accuracy, all_labels, all_preds
+
+
+def val_step(model, data_loader, criterion, device, aux_loss_weight=0.4):
+    """Performs a single validation step."""
+    model.eval()
+    running_loss = 0.0
+    correct = 0
+    total = 0
+    all_preds = []
+    all_labels = []
+
+    with torch.no_grad():
+        for images, labels in data_loader:  # Corrected Line
+
+            images, labels = images.to(device), labels.to(device)
+            outputs = model(images)
+
+            if isinstance(outputs, tuple):
+                main_out, aux_out = outputs
+                main_loss = criterion(main_out, labels)
+                aux_loss = criterion(aux_out, labels)
+                loss = main_loss + aux_loss * aux_loss_weight
+            else:
+                loss = criterion(outputs, labels)
+
+            running_loss += loss.item()
+
+            if isinstance(outputs, tuple):
+                main_out, _ = outputs
+                _, predicted = torch.max(main_out, 1)
+            else:
+                _, predicted = torch.max(outputs, 1)
+
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+            all_preds.extend(predicted.cpu())
+            all_labels.extend(labels.cpu())
+
+    avg_loss = running_loss / len(data_loader)
+    accuracy = 100. * correct / total
+    return avg_loss, accuracy, all_labels, all_preds
+
 
 def main():
-    parser = argparse.ArgumentParser(description="Train a model on pets facial expressions.")
-    parser.add_argument("--model", type=str, default="vgg16", help="Name of the model to use (vgg19, resnet152, densenet121, inception_v3, mobilenet, pretrained)")
-    parser.add_argument("--data_dir", type=str, default="data/pet_expression_classification/", help="Path to dataset directory")
-    parser.add_argument("--results_dir", type=str, default="results/", help="Base directory to save results")
-    parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
-    parser.add_argument("--epochs", type=int, default=10, help="Number of epochs")
-    parser.add_argument("--lr", type=float, default=1e-1, help="Learning rate")
-    parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay")
-    parser.add_argument("--step_size", type=int, default=5, help="Step size for learning rate scheduler")
-    parser.add_argument("--gamma", type=float, default=0.1, help="Gamma for learning rate scheduler")
-    args = parser.parse_args()
+    config = load_config()
 
-    RESULTS_DIR = os.path.join(args.results_dir, args.model)
-    os.makedirs(RESULTS_DIR, exist_ok=True)
+    # Set a manual seed for reproducibility
+    seed = config['seed']
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
 
-    img_size = (224, 224)
+    # Enable TF32 for better performance
+    torch.set_float32_matmul_precision('high')
 
-    if args.model == "vgg19":
-        from models.vgg19 import create_model
-    elif args.model == "resnet152":
-        from models.resnet152 import create_model
-    elif args.model == "densenet121":
-        from models.densenet121 import create_model
-    elif args.model == "inception_v3":
-        from models.inception_v3 import create_model
-        img_size = (299, 299)
-    elif args.model == "mobilenet":
-        from models.mobilenet import create_model
-    elif args.model == "pretrained":
-        from models.pretrained import create_model
-    else:
-        raise ValueError(f"Model {args.model} not supported")
+    # Set up directories
+    model_name = config['model']
+    results_dir = config['results_dir']
+    model_results_dir = os.path.join(results_dir, model_name)
+    os.makedirs(model_results_dir, exist_ok=True)
 
     # Load data
-    train_loader, val_loader, test_loader, class_labels = load_data(
-        args.data_dir, img_size=tuple(img_size), batch_size=args.batch_size, num_augmentations=0
+    train_loader, val_loader, _, class_labels = load_data(
+        config['data_dir'],
+        batch_size=config['batch_size'],
+        model_name=model_name,
+        seed=seed
     )
 
     print(f"Data loaded with {len(class_labels)} classes: {class_labels}")
-    print(f"Train size: {len(train_loader.dataset)}, Val size: {len(val_loader.dataset)}, Test size: {len(test_loader.dataset)}")
+    print(f"Train size: {len(train_loader.dataset)}, Val size: {len(val_loader.dataset)}")
 
     # Create model
-    model = create_model(num_classes=len(class_labels))
+    model = create_model(model_name, num_classes=len(class_labels))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
     # Loss and optimizer
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-
-    # Define StepLR scheduler
-    scheduler = StepLR(optimizer, step_size=args.step_size, gamma=args.gamma)
+    optimizer = optim.Adam(model.parameters(), lr=float(config['learning_rate']), weight_decay=float(config['weight_decay']))
+    scheduler = StepLR(optimizer, step_size=config['step_size'], gamma=config['gamma'])
 
     # Training loop
     history = {
@@ -70,53 +151,26 @@ def main():
         'precision': [], 'recall': [], 'f1': []
     }
 
+    aux_loss_weight = float(config['aux_loss_weight'])
     best_val_acc = 0.0
     best_model_state = None
+    best_precision = 0.0
+    best_recall = 0.0
+    best_f1 = 0.0
+    epochs_no_improve = 0
 
-    for epoch in range(args.epochs):
-        model.train()
-        running_loss = 0.0
-        correct = 0
-        total = 0
-        for images, labels in train_loader:
-            images, labels = images.to(device), labels.to(device)
+    for epoch in range(config['epochs']):
+        train_loss, train_acc, _, _ = train_step(
+            model, train_loader, criterion, optimizer, device,
+            accumulation_steps=config['accumulation_steps'],
+            aux_loss_weight=aux_loss_weight
+        )
 
-            optimizer.zero_grad()
-            outputs = model(images)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
+        val_loss, val_acc, all_labels, all_preds = val_step(
+            model, val_loader, criterion, device, aux_loss_weight=aux_loss_weight
+        )
 
-            running_loss += loss.item()
-            _, predicted = outputs.max(1)
-            total += labels.size(0)
-            correct += predicted.eq(labels).sum().item()
-
-        train_loss = running_loss / len(train_loader)
-        train_acc = 100. * correct / total
-
-        model.eval()
-        val_loss = 0.0
-        correct = 0
-        total = 0
-        all_preds = []
-        all_labels = []
-        with torch.no_grad():
-            for images, labels in val_loader:
-                images, labels = images.to(device), labels.to(device)
-                outputs = model(images)
-                loss = criterion(outputs, labels)
-                val_loss += loss.item()
-                _, predicted = outputs.max(1)
-                total += labels.size(0)
-                correct += predicted.eq(labels).sum().item()
-                all_preds.extend(predicted.cpu().numpy())
-                all_labels.extend(labels.cpu().numpy())
-
-        val_loss /= len(val_loader)
-        val_acc = 100. * correct / total
-
-        report, cm, precision, recall, f1 = compute_metrics(all_labels, all_preds, class_labels)
+        report, cm, precision, recall, f1 = compute_metrics(torch.tensor(all_labels), torch.tensor(all_preds), class_labels)
 
         history['train_loss'].append(train_loss)
         history['val_loss'].append(val_loss)
@@ -126,52 +180,32 @@ def main():
         history['recall'].append(recall)
         history['f1'].append(f1)
 
-        print(f"Epoch [{epoch + 1}/{args.epochs}], Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%, "
+        print(f"Epoch [{epoch + 1}/{config['epochs']}], Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%, "
               f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%, Precision: {precision:.4f}, "
               f"Recall: {recall:.4f}, F1: {f1:.4f}, "
               f"Learning rate: {optimizer.param_groups[0]['lr']}")
 
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            best_model_state = copy.deepcopy(model.state_dict())
-            print(f"Epoch {epoch + 1}: New best model saved with val_acc: {val_acc:.2f}%")
+        # Early stopping
+        best_val_acc, epochs_no_improve, best_model_state, best_precision, best_recall, best_f1 = early_stopping(
+            val_acc, best_val_acc, epochs_no_improve, config['patience'], model, best_model_state, precision, recall, f1, best_precision, best_recall, best_f1
+        )
 
-        # Step the scheduler after each epoch
+        if epochs_no_improve >= config['patience'] and config['early_stopping']:
+            print(f"Early stopping triggered at epoch {epoch + 1}")
+            break
+
         scheduler.step()
 
-    save_training_plots(history, RESULTS_DIR)
-
-    # Save the best model
+    save_training_plots(history, model_results_dir)
     if best_model_state:
-        model_path = os.path.join(RESULTS_DIR, f"{args.model}_best.pth")
-        torch.save(best_model_state, model_path)
-        print(f"Best model saved at {model_path}")
+        model_path = os.path.join(model_results_dir, f"{model_name}_best.pth")
+        save_model(best_model_state, model_path)
     else:
         print("No best model was saved, training did not improve.")
 
     # Save the args to a YAML file
-    with open(os.path.join(RESULTS_DIR, 'args.yaml'), 'w') as f:
-        yaml.dump(vars(args), f)
-
-    # Load the best model for evaluation
-    model = create_model(num_classes=len(class_labels)).to(device)
-
-    # Load the best model for evaluation
-    model.load_state_dict(best_model_state)
-    print("Best model loaded for evaluation")
-
-    # Evaluate model
-    print("Training evaluation running.")
-    evaluate_model(model, train_loader, device, class_labels, os.path.join(RESULTS_DIR, 'train'))
-    print("Training evaluation completed. Metrics saved.")
-
-    print("Validation evaluation running.")
-    evaluate_model(model, val_loader, device, class_labels, os.path.join(RESULTS_DIR, 'val'))
-    print("Validation evaluation completed. Metrics saved.")
-
-    print("Test evaluation running.")
-    evaluate_model(model, test_loader, device, class_labels, os.path.join(RESULTS_DIR, 'test'))
-    print("Test evaluation completed. Metrics saved.")
+    with open(os.path.join(model_results_dir, 'config.yaml'), 'w') as f:
+        yaml.dump(config, f)
 
 if __name__ == "__main__":
     main()

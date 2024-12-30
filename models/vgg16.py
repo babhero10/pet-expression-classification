@@ -1,9 +1,9 @@
 import torch
 import torch.nn as nn
 
-class VGG19(nn.Module):
+class VGG16(nn.Module):
     def __init__(self, num_classes=1000):
-        super(VGG19, self).__init__()
+        super(VGG16, self).__init__()
 
         self.features = nn.Sequential(
             # Block 1
@@ -25,18 +25,10 @@ class VGG19(nn.Module):
             nn.ReLU(inplace=True),
             nn.Conv2d(256, 256, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Conv2d(256, 256, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(256, 256, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
 
             # Block 4
             nn.Conv2d(256, 512, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(512, 512, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(512, 512, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
             nn.Conv2d(512, 512, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
@@ -47,20 +39,16 @@ class VGG19(nn.Module):
             nn.ReLU(inplace=True),
             nn.Conv2d(512, 512, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Conv2d(512, 512, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(512, 512, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
         )
 
         self.classifier = nn.Sequential(
             nn.Linear(512 * 7 * 7, 4096),
             nn.ReLU(inplace=True),
-            nn.Dropout(),
+            nn.Dropout(0.5),  # Added dropout
             nn.Linear(4096, 4096),
             nn.ReLU(inplace=True),
-            nn.Dropout(),
+            nn.Dropout(0.5),  # Added dropout
             nn.Linear(4096, num_classes),
         )
 
@@ -71,4 +59,4 @@ class VGG19(nn.Module):
         return x
 
 def create_model(num_classes=1000):
-    return VGG19(num_classes=num_classes)
+    return VGG16(num_classes=num_classes)
