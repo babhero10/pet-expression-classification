@@ -1,14 +1,14 @@
-model: "vgg16"  # vgg16, resnet152, densenet121, inception_v3, mobilenet, pretrained
+model: "pretrained"  # vgg16, resnet152, densenet121, inception_v3, mobilenet, pretrained
 data_dir: "data/pet_expression_classification/"
 results_dir: "results/"
-batch_size: 4
-accumulation_steps: 16
-epochs: 100
+batch_size: 64
+accumulation_steps: 1
+epochs: 200
 learning_rate: 5e-6 
 weight_decay: 5e-2
-step_size: 20
+step_size: 30
 gamma: 1.0
 early_stopping: True
-patience: 25
+patience: 35
 seed: 42
 aux_loss_weight: 0.2

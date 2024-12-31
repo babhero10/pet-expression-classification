@@ -1,37 +1,40 @@
 import torch.nn as nn
 import torchvision.models as models
-from torchvision.models import DenseNet121_Weights
+from torchvision.models import Inception_V3_Weights
 
 def create_model(num_classes):
-    """Creates a DenseNet121 model with added hidden fully connected layers
-    and a modified final layer for a custom number of classes.
+    """Creates a Inception V3 model with added hidden fully connected layers.
 
     Args:
         num_classes (int): Number of output classes.
     """
 
     # Load the pre-trained DenseNet121 model with weights
-    weights = DenseNet121_Weights.IMAGENET1K_V1
-    model = models.densenet121(weights=weights)
+    weights = Inception_V3_Weights.IMAGENET1K_V1
+
+    model = models.inception_v3(weights=weights)
 
     # Freeze all layers
     for param in model.parameters():
         param.requires_grad = False
 
-    num_ftrs = model.classifier.in_features
+    # Modify the final classifier
+    num_ftrs = model.fc.in_features
+    model.fc = nn.Sequential(
+        nn.Linear(num_ftrs, 512),
+        nn.ReLU(),  # Added ReLU activation
+        nn.Linear(512, 256),
+        nn.ReLU(),  # Added ReLU activation
+        nn.Linear(256, num_classes)
+    )
 
-    hidden_layers = [512, 256]
-    layers = []
-    prev_size = num_ftrs
-
-    for hidden_size in hidden_layers:
-        layers.append(nn.Linear(prev_size, hidden_size))
-        layers.append(nn.ReLU())
-        layers.append(nn.Dropout(0.5))
-        prev_size = hidden_size
-
-    layers.append(nn.Linear(prev_size, num_classes))
-
-    model.classifier = nn.Sequential(*layers)
+    aux_num_ftrs = model.AuxLogits.fc.in_features
+    model.AuxLogits.fc = nn.Sequential(
+        nn.Linear(aux_num_ftrs, 512),
+        nn.ReLU(),  # Added ReLU activation
+        nn.Linear(512, 256),
+        nn.ReLU(),  # Added ReLU activation
+        nn.Linear(256, num_classes)
+    )
 
     return model

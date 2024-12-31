@@ -31,7 +31,7 @@ def load_data(data_dir, batch_size, model_name, seed=42):
     torch.backends.cudnn.deterministic = True
 
     img_size = 224
-    if model_name == "inception_v3":
+    if model_name == "inception_v3" or model_name == "pretrained":
         img_size = 299
 
     # Data augmentation and normalization for training

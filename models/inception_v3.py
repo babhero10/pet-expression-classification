@@ -1,113 +1,303 @@
-import torch
 import torch.nn as nn
-import torch.nn.functional as F
+import torch
 
-class InceptionBlock(nn.Module):
-    def __init__(self, in_channels, branch1x1, branch3x3_reduce, branch3x3,
-                 branch5x5_reduce, branch5x5, branch_pool):
-        super(InceptionBlock, self).__init__()
-
-        # 1x1 Convolution Branch
-        self.branch1x1 = nn.Conv2d(in_channels, branch1x1, kernel_size=1)
-
-        # 1x1 -> 3x3 Convolution Branch
-        self.branch3x3_1 = nn.Conv2d(in_channels, branch3x3_reduce, kernel_size=1)
-        self.branch3x3_2 = nn.Conv2d(branch3x3_reduce, branch3x3, kernel_size=3, padding=1)
-
-        # 1x1 -> 5x5 Convolution Branch
-        self.branch5x5_1 = nn.Conv2d(in_channels, branch5x5_reduce, kernel_size=1)
-        self.branch5x5_2 = nn.Conv2d(branch5x5_reduce, branch5x5, kernel_size=5, padding=2)
-
-        # Pooling Branch
-        self.branch_pool = nn.Conv2d(in_channels, branch_pool, kernel_size=1)
+class ConvolutionBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, stride, padding):
+        super(ConvolutionBlock, self).__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)
+        self.batchNormalization = nn.BatchNorm2d(out_channels)
+        self.activation = nn.ReLU()
 
     def forward(self, x):
-        branch1x1 = self.branch1x1(x)
+        out = self.conv(x)
+        out = self.batchNormalization(out)
+        out = self.activation(out)
+        return out
 
-        branch3x3 = self.branch3x3_1(x)
-        branch3x3 = self.branch3x3_2(branch3x3)
+class StemBlock(nn.Module):
+    def __init__(self):
+        super(StemBlock, self).__init__()
 
-        branch5x5 = self.branch5x5_1(x)
-        branch5x5 = self.branch5x5_2(branch5x5)
-
-        branch_pool = F.avg_pool2d(x, kernel_size=3, stride=1, padding=1)
-        branch_pool = self.branch_pool(branch_pool)
-
-        outputs = [branch1x1, branch3x3, branch5x5, branch_pool]
-        return torch.cat(outputs, 1)
-
-
-class InceptionAux(nn.Module):
-    def __init__(self, in_channels, num_classes):
-        super(InceptionAux, self).__init__()
-        self.conv = nn.Conv2d(in_channels, 128, kernel_size=1)
-        self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))  # Adaptative avg pooling.
-        self.fc1 = nn.Linear(128, 1024)  # Adjust the size if necessary
-        self.fc2 = nn.Linear(1024, num_classes)
+        self.conv1 = ConvolutionBlock(3, 32, 3, 2, 0)
+        self.conv2 = ConvolutionBlock(32, 32, 3, 1, 0)
+        self.conv3 = ConvolutionBlock(32, 64, 3, 1, 1)
+        self.conv4 = ConvolutionBlock(64, 80, 3, 1, 0)
+        self.conv5 = ConvolutionBlock(80, 192, 3, 1, 1)
+        self.maxPool = nn.MaxPool2d(kernel_size=(3, 3), stride=(2, 2))
 
     def forward(self, x):
-        x = F.avg_pool2d(x, kernel_size=5, stride=3)
-        x = F.relu(self.conv(x))
-        x = self.avg_pool(x)  # Adaptive average pooling.
-        x = x.view(x.size(0), -1)  # Flatten
-        x = F.relu(self.fc1(x))
-        x = F.dropout(x, 0.5, training=self.training)
-        x = self.fc2(x)
-        return x
+
+        out = self.conv1(x)
+        out = self.conv2(out)
+        out = self.conv3(out)
+
+        out = self.maxPool(out)
+
+        out = self.conv4(out)
+        out = self.conv5(out)
+
+        out = self.maxPool(out)
+
+        return out
+
+
+class InceptionBlock_A(nn.Module):
+    def __init__(self, in_channels, nbr_kernels):
+        super(InceptionBlock_A, self).__init__()
+
+        self.branch1 = nn.Sequential(
+            ConvolutionBlock(in_channels, 64, 1, 1, 0),
+            ConvolutionBlock(64, 96, 3, 1, 1),
+            ConvolutionBlock(96, 96, 3, 1, 1)
+        )
+
+        self.branch2 = nn.Sequential(
+            ConvolutionBlock(in_channels, 48, 1, 1, 0),
+            ConvolutionBlock(48, 64, 3, 1, 1)
+        )
+
+        self.branch3 = nn.Sequential(
+            nn.AvgPool2d(kernel_size=(3, 3), stride=1, padding=1),
+            ConvolutionBlock(in_channels, 64, 1, 1, 0)
+        )
+
+        self.branch4 = ConvolutionBlock(in_channels, 64, 1, 1, 0)
+
+    def forward(self, x):
+
+        branch1 = self.branch1(x)
+        branch2 = self.branch2(x)
+        branch3 = self.branch3(x)
+        branch4 = self.branch4(x)
+
+        out = torch.cat([branch1, branch2, branch3, branch4], 1)
+
+        return out
+
+class InceptionBlock_B(nn.Module):
+    def __init__(self, in_channels, nbr_kernels):
+        super(InceptionBlock_B, self).__init__()
+
+        self.branch1 = ConvolutionBlock(in_channels, 192, 1, 1, 0)
+
+        self.branch2 = nn.Sequential(
+            ConvolutionBlock(in_channels, nbr_kernels, 1, 1, 0),
+            ConvolutionBlock(nbr_kernels, nbr_kernels, (1, 7), 1, (0, 3)),
+            ConvolutionBlock(nbr_kernels, 192, (7, 1), 1, (3, 0))
+        )
+
+        self.branch3 = nn.Sequential(
+            ConvolutionBlock(in_channels, nbr_kernels, 1, 1, 0),
+            ConvolutionBlock(nbr_kernels, nbr_kernels, (7, 1), 1, (0, 3)),
+            ConvolutionBlock(nbr_kernels, nbr_kernels, (1, 7), 1, (3, 0)),
+            ConvolutionBlock(nbr_kernels, nbr_kernels, (7, 1), 1, (0, 3)),
+            ConvolutionBlock(nbr_kernels, 192, (1, 7), 1, (3, 0)),
+        )
+
+        self.branch4 = nn.Sequential(
+            nn.AvgPool2d(kernel_size=(3, 3), stride=1, padding=1),
+            ConvolutionBlock(in_channels, 192, 1, 1, 0)
+        )
+
+    def forward(self, x):
+
+        branch1 = self.branch1(x)
+        branch2 = self.branch2(x)
+        branch3 = self.branch3(x)
+        branch4 = self.branch4(x)
+
+        out = torch.cat([branch1, branch2, branch3, branch4], 1)
+
+        return out
+
+class InceptionBlock_C(nn.Module):
+    def __init__(self, in_channels):
+        super(InceptionBlock_C, self).__init__()
+
+        self.branch1 = ConvolutionBlock(in_channels, 320, 1, 1, 0)
+
+        self.branch2 = nn.Sequential(
+            nn.AvgPool2d(kernel_size=(3, 3), stride=1, padding=1),
+            ConvolutionBlock(in_channels, 192, 1, 1, 0)
+        )
+
+        self.branch3 = ConvolutionBlock(in_channels, 384, 1, 1, 0)
+
+        self.branch3_1 = ConvolutionBlock(384, 384, (1, 3), 1, (0, 1))
+
+        self.branch3_2 = ConvolutionBlock(384, 384, (3, 1), 1, (1, 0))
+
+        self.branch4 = nn.Sequential(
+            ConvolutionBlock(in_channels, 448, 1, 1, 0),
+            ConvolutionBlock(448, 384, 3, 1, 1)
+        )
+
+        self.branch4_1 = ConvolutionBlock(384, 384, (1, 3), 1, (0, 1))
+        self.branch4_2 = ConvolutionBlock(384, 384, (3, 1), 1, (1, 0))
+
+    def forward(self, x):
+
+        branch1 = self.branch1(x)
+
+        branch2 = self.branch2(x)
+
+        branch3 = self.branch3(x)
+
+        branch3 = torch.cat([self.branch3_1(branch3), self.branch3_2(branch3)], 1)
+
+        branch4 = self.branch4(x)
+
+        branch4_1 = self.branch4_1(branch4)
+        branch4_2 = self.branch4_2(branch4)
+
+        branch4 = torch.cat([branch4_1, branch4_2], 1)
+
+        out = torch.cat([branch1, branch2, branch3, branch4], 1)
+
+        return out
+
+
+class ReductionBlock_A(nn.Module):
+    def __init__(self, in_channels):
+
+        super(ReductionBlock_A, self).__init__()
+
+        self.branch1 = nn.Sequential(
+            ConvolutionBlock(in_channels, 64, 1, 1, 0),
+            ConvolutionBlock(64, 96, 3, 1, 1),
+            ConvolutionBlock(96, 96, 3, 2, 0)
+        )
+
+        self.branch2 = ConvolutionBlock(in_channels, 384, 3, 2, 0)
+
+        self.branch3 = nn.MaxPool2d(kernel_size=(3, 3), stride=2, padding=0)
+
+    def forward(self, x):
+
+        branch1 = self.branch1(x)
+        branch2 = self.branch2(x)
+        branch3 = self.branch3(x)
+
+        out = torch.cat([branch1, branch2, branch3], 1)
+
+        return out
+
+class ReductionBlock_B(nn.Module):
+
+    def __init__(self, in_channels):
+        super(ReductionBlock_B, self).__init__()
+
+        self.branch1 = nn.Sequential(
+            ConvolutionBlock(in_channels, 192, 1, 1, 0),
+            ConvolutionBlock(192, 192, (1, 7), 1, (0, 3)),
+            ConvolutionBlock(192, 192, (7, 1), 1, (3, 0)),
+            ConvolutionBlock(192, 192, 3, 2, 0)
+        )
+
+        self.branch2 = nn.Sequential(
+            ConvolutionBlock(in_channels, 192, 1, 1, 0),
+            ConvolutionBlock(192, 320, 3, 2, 0)
+        )
+
+        self.branch3 = nn.MaxPool2d(kernel_size=(3, 3), stride=2)
+
+    def forward(self, x):
+
+        branch1 = self.branch1(x)
+        branch2 = self.branch2(x)
+        branch3 = self.branch3(x)
+
+        out = torch.cat([branch1, branch2, branch3], 1)
+
+        return out
+
+class Aux_Block(nn.Module):
+
+    def __init__(self, in_channels, num_classes=1000):
+        super(Aux_Block, self).__init__()
+
+        self.avgPool = nn.AvgPool2d(kernel_size=(5, 5), stride=3, padding=0)
+        self.conv1 = ConvolutionBlock(in_channels, 128, 1, 1, 0)
+        self.conv2 = ConvolutionBlock(128, 768, 5, 1, 0)
+        self.fc1 = nn.Linear(in_features=768, out_features=1024)
+        self.fc2 = nn.Linear(in_features=1024, out_features=num_classes)
+
+    def forward(self, x):
+
+        out = self.avgPool(x)
+
+        out = self.conv1(out)
+
+        out = self.conv2(out)
+
+        out = torch.flatten(out, 1)
+
+        out = self.fc1(out)
+        out = nn.ReLU()(out)
+
+        out = self.fc2(out)
+
+        return out
 
 
 class InceptionV3(nn.Module):
-    def __init__(self, num_classes=1000, aux_logits=True):
+    def __init__(self, num_classes=1000):
         super(InceptionV3, self).__init__()
-        self.aux_logits = aux_logits
+        self.stem = StemBlock()
 
-        # Initial Convolution and Pooling Layers
-        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=0)
-        self.conv2 = nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=0)
-        self.conv3 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
-        self.pool1 = nn.MaxPool2d(kernel_size=3, stride=2, padding=0)
+        self.inceptionA_1 = InceptionBlock_A(192, 32)
+        self.inceptionA_2 = InceptionBlock_A(288, 64)
+        self.inceptionA_3 = InceptionBlock_A(288, 64)
 
-        self.conv4 = nn.Conv2d(64, 80, kernel_size=1, stride=1, padding=0)
-        self.conv5 = nn.Conv2d(80, 192, kernel_size=3, stride=1, padding=0)
-        self.pool2 = nn.MaxPool2d(kernel_size=3, stride=2, padding=0)
+        self.reductionA = ReductionBlock_A(288)
 
-        # Inception Blocks
-        self.inception3a = InceptionBlock(192, 64, 48, 64, 64, 96, 32)
-        self.inception3b = InceptionBlock(256, 64, 48, 64, 64, 96, 64)
-        self.inception3c = InceptionBlock(288, 64, 48, 64, 64, 96, 64)
+        self.inceptionB_1 = InceptionBlock_B(768, 128)
+        self.inceptionB_2 = InceptionBlock_B(768, 160)
+        self.inceptionB_3 = InceptionBlock_B(768, 160)
+        self.inceptionB_4 = InceptionBlock_B(768, 192)
 
-        # Auxiliary Classifier
-        if self.aux_logits:
-            self.aux = InceptionAux(288, num_classes)
+        self.aux = Aux_Block(768)
 
-        # Average Pooling and Fully Connected Layer
-        self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(288, num_classes)
+        self.reductionB = ReductionBlock_B(768)
+
+        self.inceptionC_1 = InceptionBlock_C(1280)
+        self.inceptionC_2 = InceptionBlock_C(2048)
+
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc1 = nn.Linear(in_features=2048, out_features=2048)
+        self.fc2 = nn.Linear(in_features=2048, out_features=num_classes)
 
     def forward(self, x):
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
-        x = F.relu(self.conv3(x))
-        x = self.pool1(x)
 
-        x = F.relu(self.conv4(x))
-        x = F.relu(self.conv5(x))
-        x = self.pool2(x)
+        out = self.stem(x)
 
-        x = self.inception3a(x)
-        x = self.inception3b(x)
-        aux_out = None
-        if self.aux_logits and self.training:
-            aux_out = self.aux(x)
-        x = self.inception3c(x)
+        out = self.inceptionA_1(out)
+        out = self.inceptionA_2(out)
+        out = self.inceptionA_3(out)
 
-        x = self.avg_pool(x)
-        x = torch.flatten(x, 1)
-        x = self.fc(x)
-        if self.aux_logits and self.training:
-            return x, aux_out
-        else:
-            return x
+        out = self.reductionA(out)
+
+        out = self.inceptionB_1(out)
+        out = self.inceptionB_2(out)
+        out = self.inceptionB_3(out)
+        out = self.inceptionB_4(out)
+
+        aux = self.aux(out)
+
+        out = self.reductionB(out)
+
+        out = self.inceptionC_1(out)
+        out = self.inceptionC_2(out)
+
+        out = self.avgpool(out)
+        out = out.reshape(out.shape[0], -1)
+
+        out = self.fc1(out)
+        out = nn.ReLU()(out)
+
+        out = self.fc2(out)
+
+        return out, aux
 
 def create_model(num_classes=1000):
     return InceptionV3(num_classes=num_classes)

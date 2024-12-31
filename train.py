@@ -46,7 +46,7 @@ def train_step(model, data_loader, criterion, optimizer, device, accumulation_st
             optimizer.step()
             optimizer.zero_grad()
 
-        running_loss += loss.item() * accumulation_steps  # Scale loss back to normal
+        running_loss += loss.item() * accumulation_steps
 
         if isinstance(outputs, tuple):
             main_out, _ = outputs

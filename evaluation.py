@@ -40,6 +40,8 @@ def main():
     model_path = os.path.join(model_results_dir, f"{model_name}_best.pth")
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Best model not found at {model_path}")
+
+    # Load the best model.
     model = load_model(model, model_path)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
