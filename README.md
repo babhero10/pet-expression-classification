@@ -13,15 +13,15 @@ python -m download
 
 To train the model, you can use the following command:
 ```
-python -m train --model "vgg16" --epochs 20 --lr 0.0005 --batch_size 8 --weight_decay 1-e4
+python -m train
 ```
 
 To test the model (Not working yet), you can use the following command:
 ```
-python -m test --model "vgg16"
+python -m test
 ```
 
-arguments:
+Configs:
 - `--model`: Model to use (vgg16, resnet152, inceptionv3, mobilenet, densenet121).
 - `--epochs`: Number of epochs to train the model.
 - `--lr`: Learning rate.
